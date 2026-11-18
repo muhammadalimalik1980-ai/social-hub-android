@@ -96,7 +96,9 @@ private val PIP_PREP = """
 
 class MainActivity : Activity() {
 
-    class Win(val id: String, val name: String, val cell: FrameLayout, val web: WebView, var zoom: Int = 100)
+    class Win(val id: String, val name: String, val cell: FrameLayout, val web: WebView, var zoom: Int = 100) {
+        var bx = -1; var by = -1; var bw = -1; var bh = -1
+    }
 
     private val BG = Color.parseColor("#12151C")
     private val PANEL = Color.parseColor("#1B2030")
@@ -254,8 +256,22 @@ class MainActivity : Activity() {
 
     private fun refresh() {
         refreshBars()
-        for (w in wins.values) w.cell.setBackgroundColor(if (w.id == selected) ACCENT else PANEL)
+        updateSelectionUi()
         relayout()
+    }
+
+    private fun updateSelectionUi() {
+        for (w in wins.values) w.cell.setBackgroundColor(if (w.id == selected) ACCENT else PANEL)
+        val w = cur()
+        zoomLbl.text = (w?.name ?: "Window") + "  " + (w?.zoom ?: 100) + "%"
+        zoomBar.isEnabled = w != null
+        zoomBar.progress = (w?.zoom ?: 100) - 50
+    }
+
+    private fun selectQuiet(id: String) {
+        if (selected == id) return
+        selected = id
+        updateSelectionUi()
     }
 
     private fun select(id: String?) {
@@ -266,27 +282,30 @@ class MainActivity : Activity() {
 
     // ---------- layouts ----------
     private fun place(w: Win, x: Int, y: Int, cw: Int, ch: Int) {
-        val lp = FrameLayout.LayoutParams(cw, ch)
-        lp.leftMargin = x
-        lp.topMargin = y
-        w.cell.layoutParams = lp
-        w.cell.visibility = View.VISIBLE
+        if (w.bx != x || w.by != y || w.bw != cw || w.bh != ch) {
+            val lp = FrameLayout.LayoutParams(cw, ch)
+            lp.leftMargin = x
+            lp.topMargin = y
+            w.cell.layoutParams = lp
+            w.bx = x; w.by = y; w.bw = cw; w.bh = ch
+        }
+        if (w.cell.visibility != View.VISIBLE) w.cell.visibility = View.VISIBLE
     }
 
     private fun relayout() {
         val W = content.width
         val H = content.height
         val list = wins.values.toList()
-        for (w in list) w.cell.visibility = View.GONE
         emptyMsg.visibility = if (list.isEmpty()) View.VISIBLE else View.GONE
         if (W == 0 || H == 0 || list.isEmpty()) return
 
+        val shown = if (mode == "tabs") listOf(cur() ?: list[0]) else list.take(MAX)
+        for (w in list) if (w !in shown && w.cell.visibility != View.GONE) w.cell.visibility = View.GONE
         if (mode == "tabs") {
-            place(cur() ?: list[0], 0, 0, W, H)
+            place(shown[0], 0, 0, W, H)
             return
         }
 
-        val shown = list.take(MAX)
         val n = shown.size
         val portrait = H > W
         val (cols, rows) = when (mode) {
@@ -356,7 +375,11 @@ class MainActivity : Activity() {
         val s = web.settings
         s.javaScriptEnabled = true
         s.domStorageEnabled = true
-        s.mediaPlaybackRequiresUserGesture = true
+        s.mediaPlaybackRequiresUserGesture = false
+        s.mixedContentMode = android.webkit.WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+        web.isFocusable = true
+        web.isFocusableInTouchMode = true
+        web.setLayerType(View.LAYER_TYPE_HARDWARE, null)
         s.setSupportZoom(true)
         s.builtInZoomControls = true
         s.displayZoomControls = false
@@ -376,8 +399,12 @@ class MainActivity : Activity() {
         val cell = FrameLayout(this)
         cell.setPadding(dp(2), dp(2), dp(2), dp(2))
         cell.addView(web, FrameLayout.LayoutParams(MATCH, MATCH))
-        web.setOnTouchListener { _, e ->
-            if (e.action == MotionEvent.ACTION_DOWN) select(id)
+        web.setOnTouchListener { v, e ->
+            if (e.action == MotionEvent.ACTION_DOWN) {
+                urlBox.clearFocus()
+                selectQuiet(id)
+                v.requestFocus()
+            }
             false
         }
         content.addView(cell)
